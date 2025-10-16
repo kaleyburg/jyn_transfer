@@ -99,6 +99,7 @@ def download_torrent_file(torrent_file: str, file_index: list[int], output_folde
             f"--select-file={file_index}",
             "--seed-time=0",
             f"--dir={output_folder}",
+            "--file-allocation=none",
             torrent_file
         ]
         subprocess.run(cmd, check=True)
@@ -425,13 +426,14 @@ def get_size(start_path = '.'):
 
 #%% process_torrents
 
-def process_torrents(start_i: int, end_i: int, pair_csv: str, reddit_folder: str):
+def process_torrents(start_i: int, end_i: int, pair_csv: str, reddit_folder: str, skip_indices: list = None):
     
     processed_basenames = set()
     merged_dataset = []
     log_records = []
     
-
+    indices_to_skip = set(skip_indices) if skip_indices else set()
+            
     # main loop
     with open(pair_csv, newline='', encoding='utf-8') as f_pairs:
         reader = list(csv.DictReader(f_pairs))
@@ -443,10 +445,46 @@ def process_torrents(start_i: int, end_i: int, pair_csv: str, reddit_folder: str
             
             base_name = row["base_name"]
             if base_name in processed_basenames:
-                continue  # skip duplicates  
+                continue  # skip duplicates    
 
             indices = [int(i) for i in row["indices"].split(",")]
-            file_index_str = ",".join(map(str, indices))
+            
+            # Filter out indices that are in the skip list
+            filtered_indices = [idx for idx in indices if idx not in indices_to_skip]
+            skipped_indices = [idx for idx in indices if idx in indices_to_skip]
+            
+            if skipped_indices:
+                print(f"⏭️ Skipping torrent download for {base_name}: indices {skipped_indices} in biggest_20.csv")
+            
+            if not filtered_indices:
+                log_records.append({
+                    "base_name": base_name,
+                    "indices": indices,
+                    "lines_in_csv": 0,
+                    "comments_kept": 0,
+                    "com_total_user_matches": 0,
+                    "com_total_top_level": 0,
+                    "submissions_kept": 0,
+                    "sub_total_matches": 0,
+                    "sub_filtered_out_link_posts": 0,
+                    "sub_filtered_out_empty_text": 0,
+                    "sub_filtered_out_deleted": 0,
+                    "error_comments": None,
+                    "error_submissions": None,
+                    "processing_time": 0,
+                    "pid": os.getpid(),
+                    "cpu_percent": psutil.cpu_percent(interval=0.1),
+                    "RAM": psutil.virtual_memory().percent,
+                    "storage_used": 0,
+                    "folder_size": 0,
+                    "files_in_folder": [],
+                    "skipped": True  # optional flag
+                })
+
+                continue
+            
+            
+            file_index_str = ",".join(map(str, filtered_indices))
             
             start_time = time.time()
             
@@ -508,7 +546,9 @@ def process_torrents(start_i: int, end_i: int, pair_csv: str, reddit_folder: str
                     "error_comments": comment_stats.get("error"),
                     "error_submissions": None,
                     "processing_time": round(time.time() - start_time, 2),
-                    "cpu_percent": psutil.cpu_percent(interval=None),
+                    "pid": os.getpid(),
+                    "cpu_percent": psutil.cpu_percent(interval=0.1),
+                    "RAM": psutil.virtual_memory().percent,
                     "storage_used": round(psutil.disk_usage(os.getcwd()).used / (1024*1024), 2),
                     "folder_size": folder_size,
                     "files_in_folder": existing_files
@@ -556,7 +596,9 @@ def process_torrents(start_i: int, end_i: int, pair_csv: str, reddit_folder: str
                     "error_comments": comment_stats.get("error"),
                     "error_submissions": submission_stats.get("error"),
                     "processing_time": round(end_time - start_time, 2),
+                    "pid": os.getpid(),
                     "cpu_percent": psutil.cpu_percent(interval=0.1),
+                    "RAM": psutil.virtual_memory().percent,
                     "storage_used": round(psutil.disk_usage(os.getcwd()).used / (1024*1024), 2),
                     "folder_size": folder_size,
                     "files_in_folder": existing_files
